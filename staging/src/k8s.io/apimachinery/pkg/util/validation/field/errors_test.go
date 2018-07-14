@@ -62,6 +62,14 @@ func TestMakeFuncs(t *testing.T) {
 }
 
 func TestErrorUsefulMessage(t *testing.T) {
+	{
+		s := Invalid(nil, nil, "").Error()
+		t.Logf("message: %v", s)
+		if !strings.Contains(s, "null") {
+			t.Errorf("error message did not contain 'null': %s", s)
+		}
+	}
+
 	s := Invalid(NewPath("foo"), "bar", "deet").Error()
 	t.Logf("message: %v", s)
 	for _, part := range []string{"foo", "bar", "deet", ErrorTypeInvalid.String()} {
@@ -90,7 +98,8 @@ func TestErrorUsefulMessage(t *testing.T) {
 	for _, part := range []string{
 		"foo", ErrorTypeInvalid.String(),
 		"Baz", "Qux", "Inner", "KV", "detail",
-		"1", "aoeu", "asdf", "Billy", "2",
+		"1", "aoeu", "Billy", "2",
+		// "asdf", TODO: re-enable once we have a better nested printer
 	} {
 		if !strings.Contains(s, part) {
 			t.Errorf("error message did not contain expected part '%v'", part)
@@ -154,5 +163,13 @@ func TestErrListFilter(t *testing.T) {
 	}
 	if len(list.Filter(NewErrorTypeMatcher(ErrorTypeInvalid))) != 1 {
 		t.Errorf("should filter")
+	}
+}
+
+func TestNotSupported(t *testing.T) {
+	notSupported := NotSupported(NewPath("f"), "v", []string{"a", "b", "c"})
+	expected := `Unsupported value: "v": supported values: "a", "b", "c"`
+	if notSupported.ErrorBody() != expected {
+		t.Errorf("Expected: %s\n, but got: %s\n", expected, notSupported.ErrorBody())
 	}
 }

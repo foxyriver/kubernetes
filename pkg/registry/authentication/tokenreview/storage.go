@@ -17,13 +17,16 @@ limitations under the License.
 package tokenreview
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
-	genericapirequest "k8s.io/apiserver/pkg/request"
+	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/kubernetes/pkg/apis/authentication"
 )
 
@@ -35,11 +38,15 @@ func NewREST(tokenAuthenticator authenticator.Request) *REST {
 	return &REST{tokenAuthenticator: tokenAuthenticator}
 }
 
+func (r *REST) NamespaceScoped() bool {
+	return false
+}
+
 func (r *REST) New() runtime.Object {
 	return &authentication.TokenReview{}
 }
 
-func (r *REST) Create(ctx genericapirequest.Context, obj runtime.Object) (runtime.Object, error) {
+func (r *REST) Create(ctx context.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, options *metav1.CreateOptions) (runtime.Object, error) {
 	tokenReview, ok := obj.(*authentication.TokenReview)
 	if !ok {
 		return nil, apierrors.NewBadRequest(fmt.Sprintf("not a TokenReview: %#v", obj))
@@ -47,6 +54,10 @@ func (r *REST) Create(ctx genericapirequest.Context, obj runtime.Object) (runtim
 	namespace := genericapirequest.NamespaceValue(ctx)
 	if len(namespace) != 0 {
 		return nil, apierrors.NewBadRequest(fmt.Sprintf("namespace is not allowed on this type: %v", namespace))
+	}
+
+	if len(tokenReview.Spec.Token) == 0 {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("token is required for TokenReview in authentication"))
 	}
 
 	if r.tokenAuthenticator == nil {

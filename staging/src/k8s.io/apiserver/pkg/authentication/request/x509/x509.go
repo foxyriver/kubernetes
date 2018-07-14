@@ -19,17 +19,44 @@ package x509
 import (
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/asn1"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/golang/glog"
+	"github.com/prometheus/client_golang/prometheus"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
 	"k8s.io/apiserver/pkg/authentication/user"
 )
+
+var clientCertificateExpirationHistogram = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
+		Namespace: "apiserver",
+		Subsystem: "client",
+		Name:      "certificate_expiration_seconds",
+		Help:      "Distribution of the remaining lifetime on the certificate used to authenticate a request.",
+		Buckets: []float64{
+			0,
+			(6 * time.Hour).Seconds(),
+			(12 * time.Hour).Seconds(),
+			(24 * time.Hour).Seconds(),
+			(2 * 24 * time.Hour).Seconds(),
+			(4 * 24 * time.Hour).Seconds(),
+			(7 * 24 * time.Hour).Seconds(),
+			(30 * 24 * time.Hour).Seconds(),
+			(3 * 30 * 24 * time.Hour).Seconds(),
+			(6 * 30 * 24 * time.Hour).Seconds(),
+			(12 * 30 * 24 * time.Hour).Seconds(),
+		},
+	},
+)
+
+func init() {
+	prometheus.MustRegister(clientCertificateExpirationHistogram)
+}
 
 // UserConversion defines an interface for extracting user info from a client certificate chain
 type UserConversion interface {
@@ -71,6 +98,8 @@ func (a *Authenticator) AuthenticateRequest(req *http.Request) (user.Info, bool,
 		}
 	}
 
+	remaining := req.TLS.PeerCertificates[0].NotAfter.Sub(time.Now())
+	clientCertificateExpirationHistogram.Observe(remaining.Seconds())
 	chains, err := req.TLS.PeerCertificates[0].Verify(optsCopy)
 	if err != nil {
 		return nil, false, err
@@ -160,26 +189,4 @@ var CommonNameUserConversion = UserConversionFunc(func(chain []*x509.Certificate
 		Name:   chain[0].Subject.CommonName,
 		Groups: chain[0].Subject.Organization,
 	}, true, nil
-})
-
-// DNSNameUserConversion builds user info from a certificate chain using the first DNSName on the certificate
-var DNSNameUserConversion = UserConversionFunc(func(chain []*x509.Certificate) (user.Info, bool, error) {
-	if len(chain[0].DNSNames) == 0 {
-		return nil, false, nil
-	}
-	return &user.DefaultInfo{Name: chain[0].DNSNames[0]}, true, nil
-})
-
-// EmailAddressUserConversion builds user info from a certificate chain using the first EmailAddress on the certificate
-var EmailAddressUserConversion = UserConversionFunc(func(chain []*x509.Certificate) (user.Info, bool, error) {
-	var emailAddressOID asn1.ObjectIdentifier = []int{1, 2, 840, 113549, 1, 9, 1}
-	if len(chain[0].EmailAddresses) == 0 {
-		for _, name := range chain[0].Subject.Names {
-			if name.Type.Equal(emailAddressOID) {
-				return &user.DefaultInfo{Name: name.Value.(string)}, true, nil
-			}
-		}
-		return nil, false, nil
-	}
-	return &user.DefaultInfo{Name: chain[0].EmailAddresses[0]}, true, nil
 })

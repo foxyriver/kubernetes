@@ -24,24 +24,24 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/pkg/api/v1"
 )
 
 var nevererrc chan error
 
 type testLW struct {
-	ListFunc  func(options v1.ListOptions) (runtime.Object, error)
-	WatchFunc func(options v1.ListOptions) (watch.Interface, error)
+	ListFunc  func(options metav1.ListOptions) (runtime.Object, error)
+	WatchFunc func(options metav1.ListOptions) (watch.Interface, error)
 }
 
-func (t *testLW) List(options v1.ListOptions) (runtime.Object, error) {
+func (t *testLW) List(options metav1.ListOptions) (runtime.Object, error) {
 	return t.ListFunc(options)
 }
-func (t *testLW) Watch(options v1.ListOptions) (watch.Interface, error) {
+func (t *testLW) Watch(options metav1.ListOptions) (watch.Interface, error) {
 	return t.WatchFunc(options)
 }
 
@@ -50,10 +50,10 @@ func TestCloseWatchChannelOnError(t *testing.T) {
 	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "bar"}}
 	fw := watch.NewFake()
 	r.listerWatcher = &testLW{
-		WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			return fw, nil
 		},
-		ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 			return &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "1"}}, nil
 		},
 	}
@@ -76,14 +76,14 @@ func TestRunUntil(t *testing.T) {
 	r := NewReflector(&testLW{}, &v1.Pod{}, store, 0)
 	fw := watch.NewFake()
 	r.listerWatcher = &testLW{
-		WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			return fw, nil
 		},
-		ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 			return &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "1"}}, nil
 		},
 	}
-	r.RunUntil(stopCh)
+	go r.Run(stopCh)
 	// Synchronously add a dummy pod into the watch channel so we
 	// know the RunUntil go routine is in the watch handler.
 	fw.Add(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "bar"}})
@@ -215,7 +215,7 @@ func TestReflectorListAndWatch(t *testing.T) {
 	// inject an error.
 	expectedRVs := []string{"1", "3"}
 	lw := &testLW{
-		WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			rv := options.ResourceVersion
 			fw := watch.NewFake()
 			if e, a := expectedRVs[0], rv; e != a {
@@ -227,7 +227,7 @@ func TestReflectorListAndWatch(t *testing.T) {
 			go func() { createdFakes <- fw }()
 			return fw, nil
 		},
-		ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 			return &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "1"}}, nil
 		},
 	}
@@ -331,7 +331,7 @@ func TestReflectorListAndWatchWithErrors(t *testing.T) {
 		}
 		watchRet, watchErr := item.events, item.watchErr
 		lw := &testLW{
-			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				if watchErr != nil {
 					return nil, watchErr
 				}
@@ -345,7 +345,7 @@ func TestReflectorListAndWatchWithErrors(t *testing.T) {
 				}()
 				return fw, nil
 			},
-			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				return item.list, item.listErr
 			},
 		}
@@ -369,11 +369,11 @@ func TestReflectorResync(t *testing.T) {
 	}
 
 	lw := &testLW{
-		WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			fw := watch.NewFake()
 			return fw, nil
 		},
-		ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 			return &v1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "0"}}, nil
 		},
 	}

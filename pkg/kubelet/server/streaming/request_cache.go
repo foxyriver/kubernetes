@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/kubernetes/pkg/util/clock"
+	"k8s.io/apimachinery/pkg/util/clock"
 )
 
 var (

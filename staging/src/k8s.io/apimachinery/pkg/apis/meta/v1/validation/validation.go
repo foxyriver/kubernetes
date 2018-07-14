@@ -72,3 +72,19 @@ func ValidateLabels(labels map[string]string, fldPath *field.Path) field.ErrorLi
 	}
 	return allErrs
 }
+
+func ValidateDeleteOptions(options *metav1.DeleteOptions) field.ErrorList {
+	allErrs := field.ErrorList{}
+	if options.OrphanDependents != nil && options.PropagationPolicy != nil {
+		allErrs = append(allErrs, field.Invalid(field.NewPath("propagationPolicy"), options.PropagationPolicy, "orphanDependents and deletionPropagation cannot be both set"))
+	}
+	if options.PropagationPolicy != nil &&
+		*options.PropagationPolicy != metav1.DeletePropagationForeground &&
+		*options.PropagationPolicy != metav1.DeletePropagationBackground &&
+		*options.PropagationPolicy != metav1.DeletePropagationOrphan {
+		allErrs = append(allErrs, field.NotSupported(field.NewPath("propagationPolicy"), options.PropagationPolicy, []string{string(metav1.DeletePropagationForeground), string(metav1.DeletePropagationBackground), string(metav1.DeletePropagationOrphan), "nil"}))
+	}
+	return allErrs
+}
+
+const UninitializedStatusUpdateErrorMsg string = `must not update status when the object is uninitialized`

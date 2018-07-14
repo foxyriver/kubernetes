@@ -19,18 +19,20 @@ package storage
 import (
 	"testing"
 
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/diff"
-	genericapirequest "k8s.io/apiserver/pkg/request"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/resource"
-	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/genericapiserver/api/rest"
-	"k8s.io/kubernetes/pkg/registry/generic"
+	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/registry/generic"
+	genericregistrytest "k8s.io/apiserver/pkg/registry/generic/testing"
+	"k8s.io/apiserver/pkg/registry/rest"
+	etcdtesting "k8s.io/apiserver/pkg/storage/etcd/testing"
+	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/registry/registrytest"
-	etcdtesting "k8s.io/kubernetes/pkg/storage/etcd/testing"
 )
 
 func newStorage(t *testing.T) (*REST, *StatusREST, *etcdtesting.EtcdTestServer) {
@@ -70,8 +72,8 @@ func TestCreate(t *testing.T) {
 	storage, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
-	test := registrytest.New(t, storage.Store)
-	pv := validNewPersistentVolumeClaim("foo", api.NamespaceDefault)
+	test := genericregistrytest.New(t, storage.Store)
+	pv := validNewPersistentVolumeClaim("foo", metav1.NamespaceDefault)
 	pv.ObjectMeta = metav1.ObjectMeta{}
 	test.TestCreate(
 		// valid
@@ -87,10 +89,10 @@ func TestUpdate(t *testing.T) {
 	storage, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
-	test := registrytest.New(t, storage.Store)
+	test := genericregistrytest.New(t, storage.Store)
 	test.TestUpdate(
 		// valid
-		validNewPersistentVolumeClaim("foo", api.NamespaceDefault),
+		validNewPersistentVolumeClaim("foo", metav1.NamespaceDefault),
 		// updateFunc
 		func(obj runtime.Object) runtime.Object {
 			object := obj.(*api.PersistentVolumeClaim)
@@ -104,33 +106,33 @@ func TestDelete(t *testing.T) {
 	storage, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
-	test := registrytest.New(t, storage.Store).ReturnDeletedObject()
-	test.TestDelete(validNewPersistentVolumeClaim("foo", api.NamespaceDefault))
+	test := genericregistrytest.New(t, storage.Store).ReturnDeletedObject()
+	test.TestDelete(validNewPersistentVolumeClaim("foo", metav1.NamespaceDefault))
 }
 
 func TestGet(t *testing.T) {
 	storage, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
-	test := registrytest.New(t, storage.Store)
-	test.TestGet(validNewPersistentVolumeClaim("foo", api.NamespaceDefault))
+	test := genericregistrytest.New(t, storage.Store)
+	test.TestGet(validNewPersistentVolumeClaim("foo", metav1.NamespaceDefault))
 }
 
 func TestList(t *testing.T) {
 	storage, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
-	test := registrytest.New(t, storage.Store)
-	test.TestList(validNewPersistentVolumeClaim("foo", api.NamespaceDefault))
+	test := genericregistrytest.New(t, storage.Store)
+	test.TestList(validNewPersistentVolumeClaim("foo", metav1.NamespaceDefault))
 }
 
 func TestWatch(t *testing.T) {
 	storage, _, server := newStorage(t)
 	defer server.Terminate(t)
 	defer storage.Store.DestroyFunc()
-	test := registrytest.New(t, storage.Store)
+	test := genericregistrytest.New(t, storage.Store)
 	test.TestWatch(
-		validNewPersistentVolumeClaim("foo", api.NamespaceDefault),
+		validNewPersistentVolumeClaim("foo", metav1.NamespaceDefault),
 		// matching labels
 		[]labels.Set{},
 		// not matching labels
@@ -156,13 +158,13 @@ func TestUpdateStatus(t *testing.T) {
 	ctx := genericapirequest.NewDefaultContext()
 
 	key, _ := storage.KeyFunc(ctx, "foo")
-	pvcStart := validNewPersistentVolumeClaim("foo", api.NamespaceDefault)
+	pvcStart := validNewPersistentVolumeClaim("foo", metav1.NamespaceDefault)
 	err := storage.Storage.Create(ctx, key, pvcStart, nil, 0)
 
 	pvc := &api.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "foo",
-			Namespace: api.NamespaceDefault,
+			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: api.PersistentVolumeClaimSpec{
 			AccessModes: []api.PersistentVolumeAccessMode{api.ReadWriteOnce},
@@ -177,7 +179,7 @@ func TestUpdateStatus(t *testing.T) {
 		},
 	}
 
-	_, _, err = statusStorage.Update(ctx, pvc.Name, rest.DefaultUpdatedObjectInfo(pvc, api.Scheme))
+	_, _, err = statusStorage.Update(ctx, pvc.Name, rest.DefaultUpdatedObjectInfo(pvc), rest.ValidateAllObjectFunc, rest.ValidateAllObjectUpdateFunc, false, &metav1.UpdateOptions{})
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -187,7 +189,15 @@ func TestUpdateStatus(t *testing.T) {
 	}
 	pvcOut := obj.(*api.PersistentVolumeClaim)
 	// only compare relevant changes b/c of difference in metadata
-	if !api.Semantic.DeepEqual(pvc.Status, pvcOut.Status) {
+	if !apiequality.Semantic.DeepEqual(pvc.Status, pvcOut.Status) {
 		t.Errorf("unexpected object: %s", diff.ObjectDiff(pvc.Status, pvcOut.Status))
 	}
+}
+
+func TestShortNames(t *testing.T) {
+	storage, _, server := newStorage(t)
+	defer server.Terminate(t)
+	defer storage.Store.DestroyFunc()
+	expected := []string{"pvc"}
+	registrytest.AssertShortNames(t, storage, expected)
 }

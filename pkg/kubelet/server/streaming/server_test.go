@@ -30,13 +30,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"k8s.io/client-go/pkg/api"
-	"k8s.io/kubernetes/pkg/client/restclient"
-	"k8s.io/kubernetes/pkg/client/unversioned/remotecommand"
-	runtimeapi "k8s.io/kubernetes/pkg/kubelet/api/v1alpha1/runtime"
+	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/client-go/transport/spdy"
+	api "k8s.io/kubernetes/pkg/apis/core"
+	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
 	kubeletportforward "k8s.io/kubernetes/pkg/kubelet/server/portforward"
-	kubeletremotecommand "k8s.io/kubernetes/pkg/kubelet/server/remotecommand"
-	"k8s.io/kubernetes/pkg/util/term"
 )
 
 const (
@@ -46,17 +45,6 @@ const (
 )
 
 func TestGetExec(t *testing.T) {
-	type testcase struct {
-		cmd   []string
-		tty   bool
-		stdin bool
-	}
-	testcases := []testcase{
-		{[]string{"echo", "foo"}, false, false},
-		{[]string{"date"}, true, false},
-		{[]string{"date"}, false, true},
-		{[]string{"date"}, true, true},
-	}
 	serv, err := NewServer(Config{
 		Addr: testAddr,
 	}, nil)
@@ -79,111 +67,166 @@ func TestGetExec(t *testing.T) {
 	}, nil)
 	assert.NoError(t, err)
 
-	assertRequestToken := func(test testcase, cache *requestCache, token string) {
+	assertRequestToken := func(expectedReq *runtimeapi.ExecRequest, cache *requestCache, token string) {
 		req, ok := cache.Consume(token)
-		require.True(t, ok, "token %s not found! testcase=%+v", token, test)
-		assert.Equal(t, testContainerID, req.(*runtimeapi.ExecRequest).GetContainerId(), "testcase=%+v", test)
-		assert.Equal(t, test.cmd, req.(*runtimeapi.ExecRequest).GetCmd(), "testcase=%+v", test)
-		assert.Equal(t, test.tty, req.(*runtimeapi.ExecRequest).GetTty(), "testcase=%+v", test)
-		assert.Equal(t, test.stdin, req.(*runtimeapi.ExecRequest).GetStdin(), "testcase=%+v", test)
+		require.True(t, ok, "token %s not found!", token)
+		assert.Equal(t, expectedReq, req)
 	}
-	containerID := testContainerID
-	for _, test := range testcases {
-		request := &runtimeapi.ExecRequest{
-			ContainerId: &containerID,
-			Cmd:         test.cmd,
-			Tty:         &test.tty,
-			Stdin:       &test.stdin,
-		}
-		{ // Non-TLS
-			resp, err := serv.GetExec(request)
-			assert.NoError(t, err, "testcase=%+v", test)
-			expectedURL := "http://" + testAddr + "/exec/"
-			assert.Contains(t, resp.GetUrl(), expectedURL, "testcase=%+v", test)
-			token := strings.TrimPrefix(resp.GetUrl(), expectedURL)
-			assertRequestToken(test, serv.(*server).cache, token)
-		}
+	request := &runtimeapi.ExecRequest{
+		ContainerId: testContainerID,
+		Cmd:         []string{"echo", "foo"},
+		Tty:         true,
+		Stdin:       true,
+	}
+	{ // Non-TLS
+		resp, err := serv.GetExec(request)
+		assert.NoError(t, err)
+		expectedURL := "http://" + testAddr + "/exec/"
+		assert.Contains(t, resp.Url, expectedURL)
+		token := strings.TrimPrefix(resp.Url, expectedURL)
+		assertRequestToken(request, serv.(*server).cache, token)
+	}
 
-		{ // TLS
-			resp, err := tlsServer.GetExec(request)
-			assert.NoError(t, err, "testcase=%+v", test)
-			expectedURL := "https://" + testAddr + "/exec/"
-			assert.Contains(t, resp.GetUrl(), expectedURL, "testcase=%+v", test)
-			token := strings.TrimPrefix(resp.GetUrl(), expectedURL)
-			assertRequestToken(test, tlsServer.(*server).cache, token)
-		}
+	{ // TLS
+		resp, err := tlsServer.GetExec(request)
+		assert.NoError(t, err)
+		expectedURL := "https://" + testAddr + "/exec/"
+		assert.Contains(t, resp.Url, expectedURL)
+		token := strings.TrimPrefix(resp.Url, expectedURL)
+		assertRequestToken(request, tlsServer.(*server).cache, token)
+	}
 
-		{ // Path prefix
-			resp, err := prefixServer.GetExec(request)
-			assert.NoError(t, err, "testcase=%+v", test)
-			expectedURL := "http://" + testAddr + "/" + pathPrefix + "/exec/"
-			assert.Contains(t, resp.GetUrl(), expectedURL, "testcase=%+v", test)
-			token := strings.TrimPrefix(resp.GetUrl(), expectedURL)
-			assertRequestToken(test, prefixServer.(*server).cache, token)
-		}
+	{ // Path prefix
+		resp, err := prefixServer.GetExec(request)
+		assert.NoError(t, err)
+		expectedURL := "http://" + testAddr + "/" + pathPrefix + "/exec/"
+		assert.Contains(t, resp.Url, expectedURL)
+		token := strings.TrimPrefix(resp.Url, expectedURL)
+		assertRequestToken(request, prefixServer.(*server).cache, token)
+	}
+}
+
+func TestValidateExecAttachRequest(t *testing.T) {
+	type config struct {
+		tty    bool
+		stdin  bool
+		stdout bool
+		stderr bool
+	}
+	for _, tc := range []struct {
+		desc      string
+		configs   []config
+		expectErr bool
+	}{
+		{
+			desc:      "at least one stream must be true",
+			expectErr: true,
+			configs: []config{
+				{false, false, false, false},
+				{true, false, false, false}},
+		},
+		{
+			desc:      "tty and stderr cannot both be true",
+			expectErr: true,
+			configs: []config{
+				{true, false, false, true},
+				{true, false, true, true},
+				{true, true, false, true},
+				{true, true, true, true},
+			},
+		},
+		{
+			desc:      "a valid config should pass",
+			expectErr: false,
+			configs: []config{
+				{false, false, false, true},
+				{false, false, true, false},
+				{false, false, true, true},
+				{false, true, false, false},
+				{false, true, false, true},
+				{false, true, true, false},
+				{false, true, true, true},
+				{true, false, true, false},
+				{true, true, false, false},
+				{true, true, true, false},
+			},
+		},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			for _, c := range tc.configs {
+				// validate the exec request.
+				execReq := &runtimeapi.ExecRequest{
+					ContainerId: testContainerID,
+					Cmd:         []string{"date"},
+					Tty:         c.tty,
+					Stdin:       c.stdin,
+					Stdout:      c.stdout,
+					Stderr:      c.stderr,
+				}
+				err := validateExecRequest(execReq)
+				assert.Equal(t, tc.expectErr, err != nil, "config: %v,  err: %v", c, err)
+
+				// validate the attach request.
+				attachReq := &runtimeapi.AttachRequest{
+					ContainerId: testContainerID,
+					Tty:         c.tty,
+					Stdin:       c.stdin,
+					Stdout:      c.stdout,
+					Stderr:      c.stderr,
+				}
+				err = validateAttachRequest(attachReq)
+				assert.Equal(t, tc.expectErr, err != nil, "config: %v, err: %v", c, err)
+			}
+		})
 	}
 }
 
 func TestGetAttach(t *testing.T) {
-	type testcase struct {
-		tty   bool
-		stdin bool
-	}
-	testcases := []testcase{
-		{false, false},
-		{true, false},
-		{false, true},
-		{true, true},
-	}
 	serv, err := NewServer(Config{
 		Addr: testAddr,
 	}, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	tlsServer, err := NewServer(Config{
 		Addr:      testAddr,
 		TLSConfig: &tls.Config{},
 	}, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assertRequestToken := func(test testcase, cache *requestCache, token string) {
+	assertRequestToken := func(expectedReq *runtimeapi.AttachRequest, cache *requestCache, token string) {
 		req, ok := cache.Consume(token)
-		require.True(t, ok, "token %s not found! testcase=%+v", token, test)
-		assert.Equal(t, testContainerID, req.(*runtimeapi.AttachRequest).GetContainerId(), "testcase=%+v", test)
-		assert.Equal(t, test.tty, req.(*runtimeapi.AttachRequest).GetTty(), "testcase=%+v", test)
-		assert.Equal(t, test.stdin, req.(*runtimeapi.AttachRequest).GetStdin(), "testcase=%+v", test)
+		require.True(t, ok, "token %s not found!", token)
+		assert.Equal(t, expectedReq, req)
 	}
-	containerID := testContainerID
-	for _, test := range testcases {
-		request := &runtimeapi.AttachRequest{
-			ContainerId: &containerID,
-			Stdin:       &test.stdin,
-			Tty:         &test.tty,
-		}
-		{ // Non-TLS
-			resp, err := serv.GetAttach(request)
-			assert.NoError(t, err, "testcase=%+v", test)
-			expectedURL := "http://" + testAddr + "/attach/"
-			assert.Contains(t, resp.GetUrl(), expectedURL, "testcase=%+v", test)
-			token := strings.TrimPrefix(resp.GetUrl(), expectedURL)
-			assertRequestToken(test, serv.(*server).cache, token)
-		}
 
-		{ // TLS
-			resp, err := tlsServer.GetAttach(request)
-			assert.NoError(t, err, "testcase=%+v", test)
-			expectedURL := "https://" + testAddr + "/attach/"
-			assert.Contains(t, resp.GetUrl(), expectedURL, "testcase=%+v", test)
-			token := strings.TrimPrefix(resp.GetUrl(), expectedURL)
-			assertRequestToken(test, tlsServer.(*server).cache, token)
-		}
+	request := &runtimeapi.AttachRequest{
+		ContainerId: testContainerID,
+		Stdin:       true,
+		Tty:         true,
+	}
+	{ // Non-TLS
+		resp, err := serv.GetAttach(request)
+		assert.NoError(t, err)
+		expectedURL := "http://" + testAddr + "/attach/"
+		assert.Contains(t, resp.Url, expectedURL)
+		token := strings.TrimPrefix(resp.Url, expectedURL)
+		assertRequestToken(request, serv.(*server).cache, token)
+	}
+
+	{ // TLS
+		resp, err := tlsServer.GetAttach(request)
+		assert.NoError(t, err)
+		expectedURL := "https://" + testAddr + "/attach/"
+		assert.Contains(t, resp.Url, expectedURL)
+		token := strings.TrimPrefix(resp.Url, expectedURL)
+		assertRequestToken(request, tlsServer.(*server).cache, token)
 	}
 }
 
 func TestGetPortForward(t *testing.T) {
 	podSandboxID := testPodSandboxID
 	request := &runtimeapi.PortForwardRequest{
-		PodSandboxId: &podSandboxID,
+		PodSandboxId: podSandboxID,
 		Port:         []int32{1, 2, 3, 4},
 	}
 
@@ -195,11 +238,11 @@ func TestGetPortForward(t *testing.T) {
 		resp, err := serv.GetPortForward(request)
 		assert.NoError(t, err)
 		expectedURL := "http://" + testAddr + "/portforward/"
-		assert.True(t, strings.HasPrefix(resp.GetUrl(), expectedURL))
-		token := strings.TrimPrefix(resp.GetUrl(), expectedURL)
+		assert.True(t, strings.HasPrefix(resp.Url, expectedURL))
+		token := strings.TrimPrefix(resp.Url, expectedURL)
 		req, ok := serv.(*server).cache.Consume(token)
 		require.True(t, ok, "token %s not found!", token)
-		assert.Equal(t, testPodSandboxID, req.(*runtimeapi.PortForwardRequest).GetPodSandboxId())
+		assert.Equal(t, testPodSandboxID, req.(*runtimeapi.PortForwardRequest).PodSandboxId)
 	}
 
 	{ // TLS
@@ -211,11 +254,11 @@ func TestGetPortForward(t *testing.T) {
 		resp, err := tlsServer.GetPortForward(request)
 		assert.NoError(t, err)
 		expectedURL := "https://" + testAddr + "/portforward/"
-		assert.True(t, strings.HasPrefix(resp.GetUrl(), expectedURL))
-		token := strings.TrimPrefix(resp.GetUrl(), expectedURL)
+		assert.True(t, strings.HasPrefix(resp.Url, expectedURL))
+		token := strings.TrimPrefix(resp.Url, expectedURL)
 		req, ok := tlsServer.(*server).cache.Consume(token)
 		require.True(t, ok, "token %s not found!", token)
-		assert.Equal(t, testPodSandboxID, req.(*runtimeapi.PortForwardRequest).GetPodSandboxId())
+		assert.Equal(t, testPodSandboxID, req.(*runtimeapi.PortForwardRequest).PodSandboxId)
 	}
 }
 
@@ -231,17 +274,17 @@ func TestServePortForward(t *testing.T) {
 	s, testServer := startTestServer(t)
 	defer testServer.Close()
 
-	podSandboxID := testPodSandboxID
 	resp, err := s.GetPortForward(&runtimeapi.PortForwardRequest{
-		PodSandboxId: &podSandboxID,
+		PodSandboxId: testPodSandboxID,
 	})
 	require.NoError(t, err)
-	reqURL, err := url.Parse(resp.GetUrl())
+	reqURL, err := url.Parse(resp.Url)
 	require.NoError(t, err)
 
-	exec, err := remotecommand.NewExecutor(&restclient.Config{}, "POST", reqURL)
+	transport, upgrader, err := spdy.RoundTripperFor(&restclient.Config{})
 	require.NoError(t, err)
-	streamConn, _, err := exec.Dial(kubeletportforward.PortForwardProtocolV1Name)
+	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", reqURL)
+	streamConn, _, err := dialer.Dial(kubeletportforward.ProtocolV1Name)
 	require.NoError(t, err)
 	defer streamConn.Close()
 
@@ -261,6 +304,7 @@ func TestServePortForward(t *testing.T) {
 	doClientStreams(t, "portforward", stream, stream, nil)
 }
 
+//
 // Run the remote command test.
 // commandType is either "exec" or "attach".
 func runRemoteCommandTest(t *testing.T, commandType string) {
@@ -268,25 +312,29 @@ func runRemoteCommandTest(t *testing.T, commandType string) {
 	defer testServer.Close()
 
 	var reqURL *url.URL
-	stdin := true
+	stdin, stdout, stderr := true, true, true
 	containerID := testContainerID
 	switch commandType {
 	case "exec":
 		resp, err := s.GetExec(&runtimeapi.ExecRequest{
-			ContainerId: &containerID,
+			ContainerId: containerID,
 			Cmd:         []string{"echo"},
-			Stdin:       &stdin,
+			Stdin:       stdin,
+			Stdout:      stdout,
+			Stderr:      stderr,
 		})
 		require.NoError(t, err)
-		reqURL, err = url.Parse(resp.GetUrl())
+		reqURL, err = url.Parse(resp.Url)
 		require.NoError(t, err)
 	case "attach":
 		resp, err := s.GetAttach(&runtimeapi.AttachRequest{
-			ContainerId: &containerID,
-			Stdin:       &stdin,
+			ContainerId: containerID,
+			Stdin:       stdin,
+			Stdout:      stdout,
+			Stderr:      stderr,
 		})
 		require.NoError(t, err)
-		reqURL, err = url.Parse(resp.GetUrl())
+		reqURL, err = url.Parse(resp.Url)
 		require.NoError(t, err)
 	}
 
@@ -299,16 +347,14 @@ func runRemoteCommandTest(t *testing.T, commandType string) {
 
 	go func() {
 		defer wg.Done()
-		exec, err := remotecommand.NewExecutor(&restclient.Config{}, "POST", reqURL)
+		exec, err := remotecommand.NewSPDYExecutor(&restclient.Config{}, "POST", reqURL)
 		require.NoError(t, err)
 
 		opts := remotecommand.StreamOptions{
-			SupportedProtocols: kubeletremotecommand.SupportedStreamingProtocols,
-			Stdin:              stdinR,
-			Stdout:             stdoutW,
-			Stderr:             stderrW,
-			Tty:                false,
-			TerminalSizeQueue:  nil,
+			Stdin:  stdinR,
+			Stdout: stdoutW,
+			Stderr: stderrW,
+			Tty:    false,
 		}
 		require.NoError(t, exec.Stream(opts))
 	}()
@@ -368,13 +414,13 @@ type fakeRuntime struct {
 	t *testing.T
 }
 
-func (f *fakeRuntime) Exec(containerID string, cmd []string, stdin io.Reader, stdout, stderr io.WriteCloser, tty bool, resize <-chan term.Size) error {
+func (f *fakeRuntime) Exec(containerID string, cmd []string, stdin io.Reader, stdout, stderr io.WriteCloser, tty bool, resize <-chan remotecommand.TerminalSize) error {
 	assert.Equal(f.t, testContainerID, containerID)
 	doServerStreams(f.t, "exec", stdin, stdout, stderr)
 	return nil
 }
 
-func (f *fakeRuntime) Attach(containerID string, stdin io.Reader, stdout, stderr io.WriteCloser, tty bool, resize <-chan term.Size) error {
+func (f *fakeRuntime) Attach(containerID string, stdin io.Reader, stdout, stderr io.WriteCloser, tty bool, resize <-chan remotecommand.TerminalSize) error {
 	assert.Equal(f.t, testContainerID, containerID)
 	doServerStreams(f.t, "attach", stdin, stdout, stderr)
 	return nil

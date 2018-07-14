@@ -20,17 +20,21 @@ import (
 	"reflect"
 	"testing"
 
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/kubernetes/pkg/api/v1"
+	"k8s.io/kubernetes/pkg/kubelet/configmap"
 	podtest "k8s.io/kubernetes/pkg/kubelet/pod/testing"
+	"k8s.io/kubernetes/pkg/kubelet/secret"
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 )
 
 // Stub out mirror client for testing purpose.
 func newTestManager() (*basicManager, *podtest.FakeMirrorClient) {
 	fakeMirrorClient := podtest.NewFakeMirrorClient()
-	manager := NewBasicPodManager(fakeMirrorClient).(*basicManager)
+	secretManager := secret.NewFakeManager()
+	configMapManager := configmap.NewFakeManager()
+	manager := NewBasicPodManager(fakeMirrorClient, secretManager, configMapManager, podtest.NewMockCheckpointManager()).(*basicManager)
 	return manager, fakeMirrorClient
 }
 
@@ -93,8 +97,8 @@ func TestGetSetPods(t *testing.T) {
 			t.Errorf("pod %q was not found in %#v", expected.UID, actualPods)
 		}
 	}
-	// Tests UID translation works as expected.
-	if uid := podManager.TranslatePodUID(mirrorPod.UID); uid != staticPod.UID {
+	// Tests UID translation works as expected. Convert static pod UID for comparison only.
+	if uid := podManager.TranslatePodUID(mirrorPod.UID); uid != kubetypes.ResolvedPodUID(staticPod.UID) {
 		t.Errorf("unable to translate UID %q to the static POD's UID %q; %#v",
 			mirrorPod.UID, staticPod.UID, podManager.mirrorPodByUID)
 	}
@@ -116,7 +120,7 @@ func TestDeletePods(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("mirror-pod-uid"),
 			Name:      "mirror-static-pod-name",
-			Namespace: v1.NamespaceDefault,
+			Namespace: metav1.NamespaceDefault,
 			Annotations: map[string]string{
 				kubetypes.ConfigSourceAnnotationKey: "api",
 				kubetypes.ConfigMirrorAnnotationKey: "mirror",
@@ -127,7 +131,7 @@ func TestDeletePods(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			UID:         types.UID("static-pod-uid"),
 			Name:        "mirror-static-pod-name",
-			Namespace:   v1.NamespaceDefault,
+			Namespace:   metav1.NamespaceDefault,
 			Annotations: map[string]string{kubetypes.ConfigSourceAnnotationKey: "file"},
 		},
 	}
@@ -137,7 +141,7 @@ func TestDeletePods(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				UID:         types.UID("extra-pod-uid"),
 				Name:        "extra-pod-name",
-				Namespace:   v1.NamespaceDefault,
+				Namespace:   metav1.NamespaceDefault,
 				Annotations: map[string]string{kubetypes.ConfigSourceAnnotationKey: "api"},
 			},
 		},

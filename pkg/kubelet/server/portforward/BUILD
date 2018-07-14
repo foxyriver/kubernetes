@@ -1,7 +1,5 @@
 package(default_visibility = ["//visibility:public"])
 
-licenses(["notice"])
-
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_library",
@@ -12,27 +10,33 @@ go_library(
     name = "go_default_library",
     srcs = [
         "constants.go",
+        "httpstream.go",
         "portforward.go",
+        "websocket.go",
     ],
-    tags = ["automanaged"],
+    importpath = "k8s.io/kubernetes/pkg/kubelet/server/portforward",
     deps = [
-        "//pkg/api:go_default_library",
-        "//pkg/util/httpstream:go_default_library",
-        "//pkg/util/httpstream/spdy:go_default_library",
-        "//vendor:github.com/golang/glog",
-        "//vendor:k8s.io/apimachinery/pkg/types",
-        "//vendor:k8s.io/apimachinery/pkg/util/runtime",
+        "//pkg/apis/core:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/types:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/httpstream:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/httpstream/spdy:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/runtime:go_default_library",
+        "//staging/src/k8s.io/apiserver/pkg/server/httplog:go_default_library",
+        "//staging/src/k8s.io/apiserver/pkg/util/wsstream:go_default_library",
+        "//vendor/github.com/golang/glog:go_default_library",
     ],
 )
 
 go_test(
     name = "go_default_test",
-    srcs = ["portforward_test.go"],
-    library = ":go_default_library",
-    tags = ["automanaged"],
+    srcs = [
+        "httpstream_test.go",
+        "websocket_test.go",
+    ],
+    embed = [":go_default_library"],
     deps = [
-        "//pkg/api:go_default_library",
-        "//pkg/util/httpstream:go_default_library",
+        "//pkg/apis/core:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/httpstream:go_default_library",
     ],
 )
 

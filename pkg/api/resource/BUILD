@@ -1,7 +1,5 @@
 package(default_visibility = ["//visibility:public"])
 
-licenses(["notice"])
-
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_library",
@@ -10,47 +8,12 @@ load(
 
 go_library(
     name = "go_default_library",
-    srcs = [
-        "amount.go",
-        "generated.pb.go",
-        "math.go",
-        "quantity.go",
-        "quantity_proto.go",
-        "scale_int.go",
-        "suffix.go",
-    ],
-    tags = ["automanaged"],
+    srcs = ["helpers.go"],
+    importpath = "k8s.io/kubernetes/pkg/api/resource",
     deps = [
-        "//vendor:github.com/go-openapi/spec",
-        "//vendor:github.com/gogo/protobuf/proto",
-        "//vendor:github.com/spf13/pflag",
-        "//vendor:gopkg.in/inf.v0",
-        "//vendor:k8s.io/apimachinery/pkg/openapi",
+        "//pkg/apis/core:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/api/resource:go_default_library",
     ],
-)
-
-go_test(
-    name = "go_default_test",
-    srcs = [
-        "amount_test.go",
-        "math_test.go",
-        "quantity_test.go",
-        "scale_int_test.go",
-    ],
-    library = ":go_default_library",
-    tags = ["automanaged"],
-    deps = [
-        "//vendor:github.com/google/gofuzz",
-        "//vendor:github.com/spf13/pflag",
-        "//vendor:gopkg.in/inf.v0",
-    ],
-)
-
-go_test(
-    name = "go_default_xtest",
-    srcs = ["quantity_example_test.go"],
-    tags = ["automanaged"],
-    deps = ["//pkg/api/resource:go_default_library"],
 )
 
 filegroup(
@@ -64,4 +27,16 @@ filegroup(
     name = "all-srcs",
     srcs = [":package-srcs"],
     tags = ["automanaged"],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = ["helpers_test.go"],
+    embed = [":go_default_library"],
+    deps = [
+        "//pkg/apis/core:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/api/resource:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/uuid:go_default_library",
+    ],
 )

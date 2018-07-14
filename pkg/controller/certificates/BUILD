@@ -1,7 +1,3 @@
-package(default_visibility = ["//visibility:public"])
-
-licenses(["notice"])
-
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_library",
@@ -13,30 +9,24 @@ go_library(
     srcs = [
         "certificate_controller.go",
         "certificate_controller_utils.go",
-        "cfssl_signer.go",
-        "doc.go",
-        "groupapprove.go",
     ],
-    tags = ["automanaged"],
+    importpath = "k8s.io/kubernetes/pkg/controller/certificates",
+    visibility = ["//visibility:public"],
     deps = [
-        "//pkg/api/v1:go_default_library",
-        "//pkg/apis/certificates/v1alpha1:go_default_library",
-        "//pkg/client/cache:go_default_library",
-        "//pkg/client/clientset_generated/clientset:go_default_library",
-        "//pkg/client/clientset_generated/clientset/typed/certificates/v1alpha1:go_default_library",
-        "//pkg/client/clientset_generated/clientset/typed/core/v1:go_default_library",
-        "//pkg/client/record:go_default_library",
         "//pkg/controller:go_default_library",
-        "//pkg/util/workqueue:go_default_library",
-        "//vendor:github.com/cloudflare/cfssl/config",
-        "//vendor:github.com/cloudflare/cfssl/helpers",
-        "//vendor:github.com/cloudflare/cfssl/signer",
-        "//vendor:github.com/cloudflare/cfssl/signer/local",
-        "//vendor:github.com/golang/glog",
-        "//vendor:k8s.io/apimachinery/pkg/runtime",
-        "//vendor:k8s.io/apimachinery/pkg/util/runtime",
-        "//vendor:k8s.io/apimachinery/pkg/util/wait",
-        "//vendor:k8s.io/apimachinery/pkg/watch",
+        "//staging/src/k8s.io/api/certificates/v1beta1:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/api/errors:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/runtime:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/wait:go_default_library",
+        "//staging/src/k8s.io/client-go/informers/certificates/v1beta1:go_default_library",
+        "//staging/src/k8s.io/client-go/kubernetes:go_default_library",
+        "//staging/src/k8s.io/client-go/kubernetes/typed/core/v1:go_default_library",
+        "//staging/src/k8s.io/client-go/listers/certificates/v1beta1:go_default_library",
+        "//staging/src/k8s.io/client-go/tools/cache:go_default_library",
+        "//staging/src/k8s.io/client-go/tools/record:go_default_library",
+        "//staging/src/k8s.io/client-go/util/workqueue:go_default_library",
+        "//vendor/github.com/golang/glog:go_default_library",
+        "//vendor/golang.org/x/time/rate:go_default_library",
     ],
 )
 
@@ -49,25 +39,28 @@ filegroup(
 
 filegroup(
     name = "all-srcs",
-    srcs = [":package-srcs"],
+    srcs = [
+        ":package-srcs",
+        "//pkg/controller/certificates/approver:all-srcs",
+        "//pkg/controller/certificates/cleaner:all-srcs",
+        "//pkg/controller/certificates/signer:all-srcs",
+    ],
     tags = ["automanaged"],
+    visibility = [
+        "//pkg/controller:__pkg__",
+    ],
 )
 
 go_test(
     name = "go_default_test",
-    srcs = [
-        "cfssl_signer_test.go",
-        "groupapprove_test.go",
-    ],
-    data = [
-        "testdata/ca.crt",
-        "testdata/ca.key",
-        "testdata/kubelet.csr",
-    ],
-    library = ":go_default_library",
-    tags = ["automanaged"],
+    srcs = ["certificate_controller_test.go"],
+    embed = [":go_default_library"],
     deps = [
-        "//pkg/apis/certificates/v1alpha1:go_default_library",
-        "//pkg/util/cert:go_default_library",
+        "//pkg/controller:go_default_library",
+        "//staging/src/k8s.io/api/certificates/v1beta1:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/util/wait:go_default_library",
+        "//staging/src/k8s.io/client-go/informers:go_default_library",
+        "//staging/src/k8s.io/client-go/kubernetes/fake:go_default_library",
     ],
 )

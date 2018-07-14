@@ -17,18 +17,25 @@ limitations under the License.
 package pod
 
 import (
+	"context"
+	"net/url"
 	"reflect"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	genericapirequest "k8s.io/apiserver/pkg/request"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/types"
+	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	apitesting "k8s.io/kubernetes/pkg/api/testing"
-	"k8s.io/kubernetes/pkg/fields"
+	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/kubelet/client"
+
+	// install all api groups for testing
+	_ "k8s.io/kubernetes/pkg/api/testapi"
 )
 
 func TestMatchPod(t *testing.T) {
@@ -67,6 +74,20 @@ func TestMatchPod(t *testing.T) {
 		},
 		{
 			in: &api.Pod{
+				Spec: api.PodSpec{SchedulerName: "scheduler1"},
+			},
+			fieldSelector: fields.ParseSelectorOrDie("spec.schedulerName=scheduler1"),
+			expectMatch:   true,
+		},
+		{
+			in: &api.Pod{
+				Spec: api.PodSpec{SchedulerName: "scheduler1"},
+			},
+			fieldSelector: fields.ParseSelectorOrDie("spec.schedulerName=scheduler2"),
+			expectMatch:   false,
+		},
+		{
+			in: &api.Pod{
 				Status: api.PodStatus{Phase: api.PodRunning},
 			},
 			fieldSelector: fields.ParseSelectorOrDie("status.phase=Running"),
@@ -79,7 +100,34 @@ func TestMatchPod(t *testing.T) {
 			fieldSelector: fields.ParseSelectorOrDie("status.phase=Pending"),
 			expectMatch:   false,
 		},
-	}
+		{
+			in: &api.Pod{
+				Status: api.PodStatus{PodIP: "1.2.3.4"},
+			},
+			fieldSelector: fields.ParseSelectorOrDie("status.podIP=1.2.3.4"),
+			expectMatch:   true,
+		},
+		{
+			in: &api.Pod{
+				Status: api.PodStatus{PodIP: "1.2.3.4"},
+			},
+			fieldSelector: fields.ParseSelectorOrDie("status.podIP=4.3.2.1"),
+			expectMatch:   false,
+		},
+		{
+			in: &api.Pod{
+				Status: api.PodStatus{NominatedNodeName: "node1"},
+			},
+			fieldSelector: fields.ParseSelectorOrDie("status.nominatedNodeName=node1"),
+			expectMatch:   true,
+		},
+		{
+			in: &api.Pod{
+				Status: api.PodStatus{NominatedNodeName: "node1"},
+			},
+			fieldSelector: fields.ParseSelectorOrDie("status.nominatedNodeName=node2"),
+			expectMatch:   false,
+		}}
 	for _, testCase := range testCases {
 		m := MatchPod(labels.Everything(), testCase.fieldSelector)
 		result, err := m.Matches(testCase.in)
@@ -101,11 +149,6 @@ func getResourceList(cpu, memory string) api.ResourceList {
 		res[api.ResourceMemory] = resource.MustParse(memory)
 	}
 	return res
-}
-
-func addResource(rName, value string, rl api.ResourceList) api.ResourceList {
-	rl[api.ResourceName(rName)] = resource.MustParse(value)
-	return rl
 }
 
 func getResourceRequirements(requests, limits api.ResourceList) api.ResourceRequirements {
@@ -210,7 +253,7 @@ func TestCheckGracefulDelete(t *testing.T) {
 		},
 	}
 	for _, tc := range tcs {
-		out := &api.DeleteOptions{GracePeriodSeconds: &defaultGracePeriod}
+		out := &metav1.DeleteOptions{GracePeriodSeconds: &defaultGracePeriod}
 		Strategy.CheckGracefulDelete(genericapirequest.NewContext(), tc.in, out)
 		if out.GracePeriodSeconds == nil {
 			t.Errorf("out grace period was nil but supposed to be %v", tc.gracePeriod)
@@ -225,7 +268,7 @@ type mockPodGetter struct {
 	pod *api.Pod
 }
 
-func (g mockPodGetter) Get(genericapirequest.Context, string, *metav1.GetOptions) (runtime.Object, error) {
+func (g mockPodGetter) Get(context.Context, string, *metav1.GetOptions) (runtime.Object, error) {
 	return g.pod, nil
 }
 
@@ -327,9 +370,75 @@ func TestCheckLogLocation(t *testing.T) {
 
 func TestSelectableFieldLabelConversions(t *testing.T) {
 	apitesting.TestSelectableFieldLabelConversionsOfKind(t,
-		api.Registry.GroupOrDie(api.GroupName).GroupVersion.String(),
+		"v1",
 		"Pod",
 		PodToSelectableFields(&api.Pod{}),
 		nil,
 	)
+}
+
+type mockConnectionInfoGetter struct {
+	info *client.ConnectionInfo
+}
+
+func (g mockConnectionInfoGetter) GetConnectionInfo(nodeName types.NodeName) (*client.ConnectionInfo, error) {
+	return g.info, nil
+}
+
+func TestPortForwardLocation(t *testing.T) {
+	ctx := genericapirequest.NewDefaultContext()
+	tcs := []struct {
+		in          *api.Pod
+		info        *client.ConnectionInfo
+		opts        *api.PodPortForwardOptions
+		expectedErr error
+		expectedURL *url.URL
+	}{
+		{
+			in: &api.Pod{
+				Spec: api.PodSpec{},
+			},
+			opts:        &api.PodPortForwardOptions{},
+			expectedErr: errors.NewBadRequest("pod test does not have a host assigned"),
+		},
+		{
+			in: &api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ns",
+					Name:      "pod1",
+				},
+				Spec: api.PodSpec{
+					NodeName: "node1",
+				},
+			},
+			info:        &client.ConnectionInfo{},
+			opts:        &api.PodPortForwardOptions{},
+			expectedURL: &url.URL{Host: ":", Path: "/portForward/ns/pod1"},
+		},
+		{
+			in: &api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ns",
+					Name:      "pod1",
+				},
+				Spec: api.PodSpec{
+					NodeName: "node1",
+				},
+			},
+			info:        &client.ConnectionInfo{},
+			opts:        &api.PodPortForwardOptions{Ports: []int32{80}},
+			expectedURL: &url.URL{Host: ":", Path: "/portForward/ns/pod1", RawQuery: "port=80"},
+		},
+	}
+	for _, tc := range tcs {
+		getter := &mockPodGetter{tc.in}
+		connectionGetter := &mockConnectionInfoGetter{tc.info}
+		loc, _, err := PortForwardLocation(getter, connectionGetter, ctx, "test", tc.opts)
+		if !reflect.DeepEqual(err, tc.expectedErr) {
+			t.Errorf("expected %v, got %v", tc.expectedErr, err)
+		}
+		if !reflect.DeepEqual(loc, tc.expectedURL) {
+			t.Errorf("expected %v, got %v", tc.expectedURL, loc)
+		}
+	}
 }

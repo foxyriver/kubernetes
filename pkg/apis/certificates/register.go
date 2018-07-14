@@ -19,7 +19,6 @@ package certificates
 import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/kubernetes/pkg/api"
 )
 
 var (
@@ -43,16 +42,11 @@ func Resource(resource string) schema.GroupResource {
 	return SchemeGroupVersion.WithResource(resource).GroupResource()
 }
 
-// Adds the list of known types to api.Scheme.
+// Adds the list of known types to the given scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&CertificateSigningRequest{},
 		&CertificateSigningRequestList{},
-		&api.ListOptions{},
-		&api.DeleteOptions{},
 	)
 	return nil
 }
-
-func (obj *CertificateSigningRequest) GetObjectKind() schema.ObjectKind     { return &obj.TypeMeta }
-func (obj *CertificateSigningRequestList) GetObjectKind() schema.ObjectKind { return &obj.TypeMeta }

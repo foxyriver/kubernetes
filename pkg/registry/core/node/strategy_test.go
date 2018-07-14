@@ -19,10 +19,13 @@ package node
 import (
 	"testing"
 
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/kubernetes/pkg/api"
 	apitesting "k8s.io/kubernetes/pkg/api/testing"
-	"k8s.io/kubernetes/pkg/fields"
+	api "k8s.io/kubernetes/pkg/apis/core"
+
+	// install all api groups for testing
+	_ "k8s.io/kubernetes/pkg/api/testapi"
 )
 
 func TestMatchNode(t *testing.T) {
@@ -48,7 +51,7 @@ func TestMatchNode(t *testing.T) {
 
 func TestSelectableFieldLabelConversions(t *testing.T) {
 	apitesting.TestSelectableFieldLabelConversionsOfKind(t,
-		api.Registry.GroupOrDie(api.GroupName).GroupVersion.String(),
+		"v1",
 		"Node",
 		NodeToSelectableFields(&api.Node{}),
 		nil,

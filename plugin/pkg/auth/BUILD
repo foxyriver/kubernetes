@@ -1,7 +1,5 @@
 package(default_visibility = ["//visibility:public"])
 
-licenses(["notice"])
-
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_library",
@@ -10,7 +8,7 @@ load(
 go_library(
     name = "go_default_library",
     srcs = ["doc.go"],
-    tags = ["automanaged"],
+    importpath = "k8s.io/kubernetes/plugin/pkg/auth",
 )
 
 filegroup(
@@ -24,7 +22,7 @@ filegroup(
     name = "all-srcs",
     srcs = [
         ":package-srcs",
-        "//plugin/pkg/auth/authenticator:all-srcs",
+        "//plugin/pkg/auth/authenticator/token/bootstrap:all-srcs",
         "//plugin/pkg/auth/authorizer:all-srcs",
     ],
     tags = ["automanaged"],

@@ -18,10 +18,13 @@ package storage
 
 import (
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/apiserver/pkg/registry/generic"
+	genericregistry "k8s.io/apiserver/pkg/registry/generic/registry"
+	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/printers"
+	printersinternal "k8s.io/kubernetes/pkg/printers/internalversion"
+	printerstorage "k8s.io/kubernetes/pkg/printers/storage"
 	"k8s.io/kubernetes/pkg/registry/core/podtemplate"
-	"k8s.io/kubernetes/pkg/registry/generic"
-	genericregistry "k8s.io/kubernetes/pkg/registry/generic/registry"
 )
 
 type REST struct {
@@ -31,13 +34,9 @@ type REST struct {
 // NewREST returns a RESTStorage object that will work against pod templates.
 func NewREST(optsGetter generic.RESTOptionsGetter) *REST {
 	store := &genericregistry.Store{
-		NewFunc:     func() runtime.Object { return &api.PodTemplate{} },
-		NewListFunc: func() runtime.Object { return &api.PodTemplateList{} },
-		ObjectNameFunc: func(obj runtime.Object) (string, error) {
-			return obj.(*api.PodTemplate).Name, nil
-		},
-		PredicateFunc:     podtemplate.MatchPodTemplate,
-		QualifiedResource: api.Resource("podtemplates"),
+		NewFunc:                  func() runtime.Object { return &api.PodTemplate{} },
+		NewListFunc:              func() runtime.Object { return &api.PodTemplateList{} },
+		DefaultQualifiedResource: api.Resource("podtemplates"),
 
 		CreateStrategy: podtemplate.Strategy,
 		UpdateStrategy: podtemplate.Strategy,
@@ -45,8 +44,10 @@ func NewREST(optsGetter generic.RESTOptionsGetter) *REST {
 		ExportStrategy: podtemplate.Strategy,
 
 		ReturnDeletedObject: true,
+
+		TableConvertor: printerstorage.TableConvertor{TablePrinter: printers.NewTablePrinter().With(printersinternal.AddHandlers)},
 	}
-	options := &generic.StoreOptions{RESTOptions: optsGetter, AttrFunc: podtemplate.GetAttrs}
+	options := &generic.StoreOptions{RESTOptions: optsGetter}
 	if err := store.CompleteWithOptions(options); err != nil {
 		panic(err) // TODO: Propagate error up
 	}

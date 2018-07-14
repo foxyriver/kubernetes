@@ -24,7 +24,7 @@ import (
 	"testing"
 
 	"github.com/imdario/mergo"
-	"k8s.io/client-go/rest"
+	restclient "k8s.io/client-go/rest"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
@@ -94,7 +94,7 @@ func TestInsecureOverridesCA(t *testing.T) {
 }
 
 func TestMergeContext(t *testing.T) {
-	const namespace = "overriden-namespace"
+	const namespace = "overridden-namespace"
 
 	config := createValidTestConfig()
 	clientBuilder := NewNonInteractiveClientConfig(*config, "clean", &ConfigOverrides{}, nil)
@@ -448,11 +448,11 @@ func TestInClusterClientConfigPrecedence(t *testing.T) {
 		expectedCAFile := "/path/to/ca-from-cluster.crt"
 
 		icc := &inClusterClientConfig{
-			inClusterConfigProvider: func() (*rest.Config, error) {
-				return &rest.Config{
+			inClusterConfigProvider: func() (*restclient.Config, error) {
+				return &restclient.Config{
 					Host:        expectedServer,
 					BearerToken: expectedToken,
-					TLSClientConfig: rest.TLSClientConfig{
+					TLSClientConfig: restclient.TLSClientConfig{
 						CAFile: expectedCAFile,
 					},
 				}, nil
@@ -503,4 +503,26 @@ func matchByteArg(expected, got []byte, t *testing.T) {
 	if !reflect.DeepEqual(expected, got) {
 		t.Errorf("Expected %v, got %v", expected, got)
 	}
+}
+
+func TestNamespaceOverride(t *testing.T) {
+	config := &DirectClientConfig{
+		overrides: &ConfigOverrides{
+			Context: clientcmdapi.Context{
+				Namespace: "foo",
+			},
+		},
+	}
+
+	ns, overridden, err := config.Namespace()
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if !overridden {
+		t.Errorf("Expected overridden = true")
+	}
+
+	matchStringArg("foo", ns, t)
 }

@@ -1,10 +1,10 @@
 approvers:
+- deads2k
 - lavalamp
 - mikedanese
 reviewers:
 - '249043822'
 - a-robinson
-- bprashanth
 - brendandburns
 - caesarxuchao
 - cjcullen
@@ -34,7 +34,6 @@ reviewers:
 - jsafrane
 - jszczepkowski
 - justinsb
-- krousey
 - lavalamp
 - liggitt
 - luxas

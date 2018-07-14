@@ -19,11 +19,10 @@ package resourcequota
 import (
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	genericapirequest "k8s.io/apiserver/pkg/request"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/resource"
-	apitesting "k8s.io/kubernetes/pkg/api/testing"
+	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
+	api "k8s.io/kubernetes/pkg/apis/core"
 )
 
 func TestResourceQuotaStrategy(t *testing.T) {
@@ -58,13 +57,4 @@ func TestResourceQuotaStrategy(t *testing.T) {
 	if resourceQuota.Status.Used != nil {
 		t.Errorf("ResourceQuota does not allow setting status on create")
 	}
-}
-
-func TestSelectableFieldLabelConversions(t *testing.T) {
-	apitesting.TestSelectableFieldLabelConversionsOfKind(t,
-		api.Registry.GroupOrDie(api.GroupName).GroupVersion.String(),
-		"ResourceQuota",
-		ResourceQuotaToSelectableFields(&api.ResourceQuota{}),
-		nil,
-	)
 }
